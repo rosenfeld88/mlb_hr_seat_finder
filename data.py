@@ -232,72 +232,45 @@ def _clean_hr_df(df: pd.DataFrame) -> pd.DataFrame:
 # Section probability analysis
 # ---------------------------------------------------------------------------
 
-def assign_sections(hr_df: pd.DataFrame, lf: int, cf: int, rf: int) -> pd.DataFrame:
+def assign_sections(
+    hr_df: pd.DataFrame,
+    lf: int,
+    cf: int,
+    rf: int,
+    stadium_name: str,
+) -> pd.DataFrame:
     """
-    Add a 'section_id' column to hr_df by mapping each HR's angle and distance
-    to one of the 10 outfield sections.
+    Add a 'section_id' column to hr_df using per-stadium real section definitions.
     """
-    from stadiums import SECTION_NAMES, NEAR_DEPTH, fence_distance_at_angle
+    from sections import get_sections, classify_hr as _classify
 
     if hr_df.empty:
         return hr_df
 
-    section_ids = []
-    for _, row in hr_df.iterrows():
-        angle = row["angle_deg"]
-        dist  = row["distance_ft"]
-        sid   = _classify_hr(angle, dist, lf, cf, rf, SECTION_NAMES, NEAR_DEPTH,
-                              fence_distance_at_angle)
-        section_ids.append(sid)
+    sections = get_sections(stadium_name)
+    if not sections:
+        return hr_df
 
+    sids = [
+        _classify(row["angle_deg"], row["distance_ft"], lf, cf, rf, sections)
+        for _, row in hr_df.iterrows()
+    ]
     hr_df = hr_df.copy()
-    hr_df["section_id"] = section_ids
+    hr_df["section_id"] = sids
     return hr_df
 
 
-def _classify_hr(
-    angle: float,
-    dist: float,
-    lf: int,
-    cf: int,
-    rf: int,
-    section_names,
-    near_depth: float,
-    fence_dist_fn,
-) -> Optional[str]:
-    """Map a single HR to a section_id, or None if out of fair territory."""
-    # Outside fair territory (foul ball mis-classified, or tracking artifact)
-    if angle < -45 or angle > 45:
-        return None
-
-    fence_d = fence_dist_fn(angle, lf, cf, rf)
-    is_near = dist < (fence_d + near_depth)
-
-    for sid, _label, a_min, a_max, near_band in section_names:
-        if a_min <= angle < a_max and near_band == is_near:
-            return sid
-
-    # Edge: angle == 45 goes to RF-L or RF-U
-    for sid, _label, a_min, a_max, near_band in section_names:
-        if a_min <= angle <= a_max and near_band == is_near:
-            return sid
-
-    return None
-
-
-def compute_probabilities(hr_df: pd.DataFrame) -> dict[str, float]:
+def compute_probabilities(hr_df: pd.DataFrame, stadium_name: str) -> dict[str, float]:
     """
-    Return a dict mapping section_id → probability (0.0–1.0).
-    Probability = fraction of total HRs that landed in each section.
+    Return {section_id: probability} for every defined section of the stadium.
+    Probability = fraction of total classifiable HRs that landed in each section.
     """
-    from stadiums import SECTION_NAMES
+    from sections import get_section_ids
 
-    total = len(hr_df.dropna(subset=["section_id"]))
+    all_ids = get_section_ids(stadium_name)
+    total   = int(hr_df["section_id"].notna().sum()) if not hr_df.empty else 0
     if total == 0:
-        return {sid: 0.0 for sid, *_ in SECTION_NAMES}
+        return {sid: 0.0 for sid in all_ids}
 
     counts = hr_df["section_id"].value_counts()
-    return {
-        sid: float(counts.get(sid, 0)) / total
-        for sid, *_ in SECTION_NAMES
-    }
+    return {sid: float(counts.get(sid, 0)) / total for sid in all_ids}

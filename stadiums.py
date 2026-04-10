@@ -144,41 +144,6 @@ MLB_STADIUMS: dict[str, dict] = {
 
 STADIUM_NAMES = sorted(MLB_STADIUMS.keys())
 
-# ---------------------------------------------------------------------------
-# Outfield section definitions
-#
-# Ten sections: 5 angular columns × 2 depth rows.
-#
-# Angular columns (angle from CF, foul lines at ±45°):
-#   LF  : -45° to -27°   Left Field
-#   LCF : -27° to  -9°   Left-Center
-#   CF  :  -9° to   9°   Center
-#   RCF :   9° to  27°   Right-Center
-#   RF  :  27° to  45°   Right Field
-#
-# Depth rows (relative to the outfield fence in that direction):
-#   Lower : fence to fence+NEAR_DEPTH ft   (front rows, lower deck)
-#   Upper : fence+NEAR_DEPTH to fence+NEAR_DEPTH+FAR_DEPTH ft (upper deck)
-# ---------------------------------------------------------------------------
-
-NEAR_DEPTH = 35   # feet of "near" stands beyond the fence
-FAR_DEPTH  = 45   # additional feet of "far" stands
-
-ANGULAR_BOUNDARIES = [-45, -27, -9, 9, 27, 45]   # degrees
-SECTION_NAMES = [
-    # (section_id, label, angle_min, angle_max, near_band)
-    ("LF-L",  "LF\nLower",  -45, -27, True ),
-    ("LF-U",  "LF\nUpper",  -45, -27, False),
-    ("LCF-L", "LCF\nLower", -27,  -9, True ),
-    ("LCF-U", "LCF\nUpper", -27,  -9, False),
-    ("CF-L",  "CF\nLower",   -9,   9, True ),
-    ("CF-U",  "CF\nUpper",   -9,   9, False),
-    ("RCF-L", "RCF\nLower",   9,  27, True ),
-    ("RCF-U", "RCF\nUpper",   9,  27, False),
-    ("RF-L",  "RF\nLower",   27,  45, True ),
-    ("RF-U",  "RF\nUpper",   27,  45, False),
-]
-
 
 def fence_distance_at_angle(angle_deg: float, lf: int, cf: int, rf: int) -> float:
     """

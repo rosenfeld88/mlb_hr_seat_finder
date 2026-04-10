@@ -22,7 +22,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 
 import data as mlb_data
 import visualizer as viz
-from stadiums import MLB_STADIUMS, STADIUM_NAMES, SECTION_NAMES
+from stadiums import MLB_STADIUMS, STADIUM_NAMES
+from sections import get_sections, get_section_ids
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ class HRHeatmapApp(tk.Tk):
         self._cbar                           = None
         self._highlight_section: Optional[str] = None
         self._current_title: str             = ""
+        self._current_stadium: str           = ""
         self._data_queue: queue.Queue        = queue.Queue()
         self._poll_id:    Optional[str]      = None
         self._pending_tasks: int             = 0   # in-flight background tasks
@@ -165,9 +167,9 @@ class HRHeatmapApp(tk.Tk):
 
         # ── Section lookup (optional) ──────────────────────────────────
         label("Highlight Section (optional)")
-        valid_ids = " | ".join(s[0] for s in SECTION_NAMES)
-        tk.Label(parent, text=valid_ids, bg=PANEL, fg=FG_DIM,
-                 font=("Consolas", 7), wraplength=200, justify=tk.LEFT).grid(
+        tk.Label(parent, text="Enter a section number from\nthe selected stadium",
+                 bg=PANEL, fg=FG_DIM, font=("Consolas", 7),
+                 wraplength=200, justify=tk.LEFT).grid(
             row=row, column=0, sticky=tk.W)
         row += 1
 
@@ -294,7 +296,8 @@ class HRHeatmapApp(tk.Tk):
         self._probs  = {}
         self._highlight_section = None
         viz.draw_empty_stadium(
-            self._ax, info["lf"], info["cf"], info["rf"], title=name
+            self._ax, info["lf"], info["cf"], info["rf"],
+            stadium_name=name, title=name,
         )
         self._canvas.draw_idle()
 
@@ -371,14 +374,15 @@ class HRHeatmapApp(tk.Tk):
                     return
 
                 lf, cf, rf = info["lf"], info["cf"], info["rf"]
-                hr_df  = mlb_data.assign_sections(hr_df, lf, cf, rf)
-                probs  = mlb_data.compute_probabilities(hr_df)
+                hr_df  = mlb_data.assign_sections(hr_df, lf, cf, rf, stadium_name)
+                probs  = mlb_data.compute_probabilities(hr_df, stadium_name)
                 self._data_queue.put(("heatmap", {
-                    "hr_df":   hr_df,
-                    "probs":   probs,
+                    "hr_df":        hr_df,
+                    "probs":        probs,
                     "lf": lf, "cf": cf, "rf": rf,
-                    "title":   f"{stadium_name}  –  {label}",
-                    "total":   len(hr_df),
+                    "stadium_name": stadium_name,
+                    "title":        f"{stadium_name}  –  {label}",
+                    "total":        len(hr_df),
                 }))
             except Exception as exc:
                 self._data_queue.put(("error", str(exc)))
@@ -391,11 +395,13 @@ class HRHeatmapApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _highlight_section(self) -> None:
-        sid = self._section_var.get().strip().upper()
-        valid = {s[0] for s in SECTION_NAMES}
+        sid   = self._section_var.get().strip()
+        valid = set(get_section_ids(self._stadium_var.get()))
         if sid not in valid:
-            self._set_status(f"Unknown section '{sid}'. Valid: {', '.join(sorted(valid))}",
-                             error=True)
+            self._set_status(
+                f"Unknown section '{sid}'. Valid for this stadium: {', '.join(sorted(valid))}",
+                error=True,
+            )
             return
         self._highlight_section_id(sid)
 
@@ -406,26 +412,28 @@ class HRHeatmapApp(tk.Tk):
         self._update_info_panel(sid)
 
     def _update_info_panel(self, sid: str) -> None:
-        lines = []
-        for s_id, label, a_min, a_max, is_near in SECTION_NAMES:
-            if s_id == sid:
-                zone  = "Lower (near)" if is_near else "Upper (far)"
-                prob  = self._probs.get(sid, 0.0)
-                count = 0
-                if self._hr_df is not None and not self._hr_df.empty:
-                    count = int((self._hr_df["section_id"] == sid).sum())
-                lines = [
-                    f"Section : {sid}",
-                    f"Zone    : {zone}",
-                    f"Angles  : {a_min}° to {a_max}°",
-                    f"",
-                    f"HR Count: {count}",
-                    f"Prob.   : {prob*100:.2f}%",
-                    f"",
-                    f"(Click a section on the",
-                    f" map to inspect it.)",
-                ]
-                break
+        sections = get_sections(self._stadium_var.get())
+        match    = next((s for s in sections if s[0] == sid), None)
+        prob     = self._probs.get(sid, 0.0)
+        count    = 0
+        if self._hr_df is not None and not self._hr_df.empty:
+            count = int((self._hr_df["section_id"] == sid).sum())
+
+        if match:
+            _, _, a_min, a_max, r_in, r_out = match
+            lines = [
+                f"Section : {sid}",
+                f"Angles  : {a_min}° to {a_max}°",
+                f"Depth   : {r_in}–{r_out} ft past wall",
+                f"",
+                f"HR Count: {count}",
+                f"Prob.   : {prob*100:.2f}%",
+                f"",
+                f"(Click a section on the",
+                f" map to inspect it.)",
+            ]
+        else:
+            lines = [f"Section : {sid}", f"HR Count: {count}", f"Prob.   : {prob*100:.2f}%"]
 
         self._set_info("\n".join(lines))
 
@@ -438,6 +446,7 @@ class HRHeatmapApp(tk.Tk):
         sid = viz.section_at_point(
             event.xdata, event.ydata,
             info["lf"], info["cf"], info["rf"],
+            stadium_name=self._stadium_var.get(),
         )
         if sid:
             self._section_var.set(sid)
@@ -462,6 +471,7 @@ class HRHeatmapApp(tk.Tk):
         self._cbar = viz.draw_heatmap(
             self._ax,
             lf=info["lf"], cf=info["cf"], rf=info["rf"],
+            stadium_name=self._current_stadium,
             probabilities=self._probs,
             hr_df=self._hr_df,
             highlight_section=self._highlight_section,
@@ -475,6 +485,7 @@ class HRHeatmapApp(tk.Tk):
         self._probs               = {}
         self._highlight_section   = None
         self._current_title       = ""
+        self._current_stadium     = ""
         self._section_var.set("")
         self._set_info("")
         self._set_status("Cleared.")
@@ -488,9 +499,10 @@ class HRHeatmapApp(tk.Tk):
 
         if self._stadium_info:
             info = self._stadium_info
+            name = self._stadium_var.get()
             viz.draw_empty_stadium(
                 self._ax, info["lf"], info["cf"], info["rf"],
-                title=self._stadium_var.get(),
+                stadium_name=name, title=name,
             )
         else:
             self._ax.cla()
@@ -531,9 +543,10 @@ class HRHeatmapApp(tk.Tk):
 
             elif kind == "heatmap":
                 p = payload
-                self._hr_df         = p["hr_df"]
-                self._probs         = p["probs"]
-                self._current_title = p["title"]
+                self._hr_df            = p["hr_df"]
+                self._probs            = p["probs"]
+                self._current_title    = p["title"]
+                self._current_stadium  = p["stadium_name"]
                 self._gen_btn.configure(state=tk.NORMAL)
                 self._redraw()
                 self._set_status(
@@ -584,9 +597,8 @@ class HRHeatmapApp(tk.Tk):
         else:
             counts = {}
 
-        sorted_sections = sorted(
-            SECTION_NAMES, key=lambda s: self._probs.get(s[0], 0), reverse=True
-        )
+        sections = get_sections(self._stadium_var.get())
+        sorted_sections = sorted(sections, key=lambda s: self._probs.get(s[0], 0), reverse=True)
         for sid, _lbl, *_ in sorted_sections:
             prob  = self._probs.get(sid, 0.0)
             cnt   = int(counts.get(sid, 0)) if hasattr(counts, "get") else 0
