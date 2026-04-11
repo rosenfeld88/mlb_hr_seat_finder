@@ -52,6 +52,12 @@ _TIMEOUT = 30
 # Minimum HRs required to generate a meaningful heatmap
 MIN_HR_COUNT = 3
 
+# First season Statcast tracking data is available
+STATCAST_FIRST_SEASON = 2015
+
+# Sentinel value used by the GUI to request career data
+CAREER = "Career"
+
 
 # ---------------------------------------------------------------------------
 # Team / roster helpers  (statsapi — MLB-StatsAPI by toddrob99)
@@ -106,13 +112,32 @@ def get_roster(team_id: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _savant_params(season: int, **extra) -> dict:
-    """Build the common Baseball Savant search parameters."""
+    """Build Baseball Savant search parameters for a single season."""
     return {
         "all":          "true",
         "type":         "details",
         "player_type":  "batter",
         "hfTypes":      "home_run|",
         "hfSea":        f"{season}|",
+        "metric_1":     "",
+        "sort_col":     "pitches",
+        "sort_order":   "desc",
+        "min_pitches":  "0",
+        "min_results":  "0",
+        **extra,
+    }
+
+
+def _savant_career_params(**extra) -> dict:
+    """
+    Build Baseball Savant search parameters spanning all Statcast seasons.
+    Omitting hfSea returns every available season (2015-present).
+    """
+    return {
+        "all":          "true",
+        "type":         "details",
+        "player_type":  "batter",
+        "hfTypes":      "home_run|",
         "metric_1":     "",
         "sort_col":     "pitches",
         "sort_order":   "desc",
@@ -166,6 +191,27 @@ def fetch_team_hr_data(team_abbrev: str, season: int) -> pd.DataFrame:
         df = _pybaseball_fallback(team_abbrev=team_abbrev, season=season)
 
     return df
+
+
+
+def fetch_player_hr_career(player_id: int) -> pd.DataFrame:
+    """
+    Download all Statcast home-run rows for a single batter across their
+    entire career (2015-present) in one request.
+    """
+    params = _savant_career_params(**{"batters_lookup[]": player_id})
+    df = _download_savant_csv(params)
+    return _clean_hr_df(df)
+
+
+def fetch_team_hr_career(team_abbrev: str) -> pd.DataFrame:
+    """
+    Download all Statcast home-run rows for a team across all available
+    seasons (2015-present) in one request.
+    """
+    params = _savant_career_params(team=team_abbrev)
+    df = _download_savant_csv(params)
+    return _clean_hr_df(df)
 
 
 def _pybaseball_fallback(

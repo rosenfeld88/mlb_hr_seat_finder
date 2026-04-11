@@ -161,7 +161,7 @@ class HRHeatmapApp(tk.Tk):
         # ── Season ────────────────────────────────────────────────────
         label("Season")
         self._season_var = tk.StringVar(value="2024")
-        seasons = [str(y) for y in range(2025, 2018, -1)]
+        seasons = ["Career"] + [str(y) for y in range(2027, 2018, -1)]
         self._season_cb  = combo(seasons)
         self._season_cb.set("2024")
 
@@ -338,11 +338,15 @@ class HRHeatmapApp(tk.Tk):
             return
 
         stadium_name  = self._stadium_var.get()
+        team_name     = self._team_var.get()
         player_choice = self._player_var.get()
-        season        = int(self._season_cb.get())
+        season_val    = self._season_cb.get()
+        is_career     = season_val == mlb_data.CAREER
+        season        = None if is_career else int(season_val)
 
         self._gen_btn.configure(state=tk.DISABLED)
-        self._set_status("Downloading HR data from Baseball Savant…", dim=True)
+        season_label  = "Career" if is_career else str(season_val)
+        self._set_status(f"Downloading HR data from Baseball Savant ({season_label})…", dim=True)
 
         info = self._stadium_info
 
@@ -350,8 +354,11 @@ class HRHeatmapApp(tk.Tk):
             try:
                 if player_choice == "All Players":
                     abbrev = info["abbrev"]
-                    hr_df  = mlb_data.fetch_team_hr_data(abbrev, season)
-                    label  = f"{info['team']} – {season}"
+                    if is_career:
+                        hr_df = mlb_data.fetch_team_hr_career(abbrev)
+                    else:
+                        hr_df = mlb_data.fetch_team_hr_data(abbrev, season)
+                    label = f"{team_name} – {season_label}"
                 else:
                     # Find player ID
                     pid = next(
@@ -360,9 +367,11 @@ class HRHeatmapApp(tk.Tk):
                     )
                     if pid is None:
                         raise ValueError(f"Player not found: {player_choice}")
-                    hr_df = mlb_data.fetch_player_hr_data(pid, season)
-                    label = f"{player_choice} – {season}"
-
+                    if is_career:
+                        hr_df = mlb_data.fetch_player_hr_career(pid)
+                    else:
+                        hr_df = mlb_data.fetch_player_hr_data(pid, season)
+                    label = f"{player_choice} – {season_label}"
                 if hr_df.empty:
                     self._data_queue.put(("warning",
                         f"No HR data found for {label}.\n"
