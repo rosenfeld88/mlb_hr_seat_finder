@@ -145,8 +145,8 @@ class HRHeatmapApp(tk.Tk):
         self._stadium_cb.configure(textvariable=self._stadium_var)
         self._stadium_cb.bind("<<ComboboxSelected>>", self._on_stadium_selected)
 
-        # ── Team (shows home team; cannot change if stadium has one team) ──
-        label("Team")
+        # ── Team (any MLB team, independent of stadium) ───────────────
+        label("Batting Team")
         self._team_var = tk.StringVar()
         self._team_cb  = combo()
         self._team_cb.configure(textvariable=self._team_var)
@@ -271,17 +271,13 @@ class HRHeatmapApp(tk.Tk):
             return
         self._stadium_info = info
 
-        # Populate team dropdown using the stadium's home team.
-        # If mlbstatsapi teams are loaded, match by team_id; otherwise use static name.
+        # Populate team dropdown with all MLB teams; pre-select the home team.
         home_team = info["team"]
-        if self._teams:
-            matched = [t for t in self._teams if t["id"] == info["team_id"]]
-            team_names = [t["name"] for t in matched] if matched else [home_team]
-        else:
-            team_names = [home_team]
-
-        self._team_cb["values"] = team_names
-        self._team_cb.set(team_names[0])
+        all_names = [t["name"] for t in self._teams] if self._teams else [home_team]
+        self._team_cb["values"] = all_names
+        # Default to home team if present, otherwise first entry
+        default = home_team if home_team in all_names else (all_names[0] if all_names else "")
+        self._team_cb.set(default)
         self._player_cb["values"] = ["All Players"]
         self._player_cb.set("All Players")
 
@@ -529,8 +525,10 @@ class HRHeatmapApp(tk.Tk):
 
             if kind == "teams":
                 self._teams = payload
+                all_names = [t["name"] for t in self._teams]
+                self._team_cb["values"] = all_names
                 self._set_status("Teams loaded. Select a stadium to begin.")
-                # If stadium already selected, populate team dropdown
+                # If stadium already selected, re-run selection to set home-team default
                 if self._stadium_var.get():
                     self._on_stadium_selected()
 
